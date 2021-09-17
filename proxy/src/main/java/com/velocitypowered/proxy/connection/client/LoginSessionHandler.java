@@ -19,12 +19,14 @@ package com.velocitypowered.proxy.connection.client;
 
 import static com.google.common.net.UrlEscapers.urlFormParameterEscaper;
 import static com.velocitypowered.api.network.ProtocolVersion.MINECRAFT_1_8;
+import static com.velocitypowered.proxy.AuthServiceSingleton.authLibToVelocityProfiles;
 import static com.velocitypowered.proxy.VelocityServer.GENERAL_GSON;
 import static com.velocitypowered.proxy.connection.VelocityConstants.EMPTY_BYTE_ARRAY;
 import static com.velocitypowered.proxy.util.EncryptionUtils.decryptRsa;
 import static com.velocitypowered.proxy.util.EncryptionUtils.generateServerId;
 
 import com.google.common.base.Preconditions;
+import com.mojang.authlib.exceptions.AuthenticationUnavailableException;
 import com.velocitypowered.api.event.connection.DisconnectEvent;
 import com.velocitypowered.api.event.connection.DisconnectEvent.LoginStatus;
 import com.velocitypowered.api.event.connection.LoginEvent;
@@ -38,6 +40,7 @@ import com.velocitypowered.api.permission.PermissionFunction;
 import com.velocitypowered.api.proxy.server.RegisteredServer;
 import com.velocitypowered.api.util.GameProfile;
 import com.velocitypowered.api.util.UuidUtils;
+import com.velocitypowered.proxy.AuthServiceSingleton;
 import com.velocitypowered.proxy.VelocityServer;
 import com.velocitypowered.proxy.config.PlayerInfoForwarding;
 import com.velocitypowered.proxy.config.VelocityConfiguration;
@@ -146,10 +149,10 @@ public class LoginSessionHandler implements MinecraftSessionHandler {
 
         try {
           Response profileResponse = hasJoinedResponse.get();
-          if (profileResponse.getStatusCode() == 200) {
-            // All went well, initialize the session.
-            initializePlayer(GENERAL_GSON.fromJson(profileResponse.getResponseBody(),
-                GameProfile.class), true);
+          com.mojang.authlib.GameProfile candidateProfile = AuthServiceSingleton.sessionService.hasJoinedServer(
+             new com.mojang.authlib.GameProfile(UuidUtils.generateOfflinePlayerUuid(login.getUsername()), login.getUsername()), serverId, null);
+          if (candidateProfile != null) {
+            initializePlayer(authLibToVelocityProfiles(candidateProfile), true);
           } else if (profileResponse.getStatusCode() == 204) {
             // Apparently an offline-mode user logged onto this online-mode proxy.
             inbound.disconnect(Component.translatable("velocity.error.online-mode-only",
@@ -167,6 +170,8 @@ public class LoginSessionHandler implements MinecraftSessionHandler {
         } catch (InterruptedException e) {
           // not much we can do usefully
           Thread.currentThread().interrupt();
+          } catch (AuthenticationUnavailableException e) {
+           inbound.disconnect(server.getConfiguration().getMessages().getOnlineModeOnly());
         }
       }, mcConnection.eventLoop());
     } catch (GeneralSecurityException e) {
